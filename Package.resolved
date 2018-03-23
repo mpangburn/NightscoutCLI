@@ -1,0 +1,25 @@
+{
+  "object": {
+    "pins": [
+      {
+        "package": "CCommonCrypto",
+        "repositoryURL": "https://github.com/mpangburn/CCommonCrypto",
+        "state": {
+          "branch": null,
+          "revision": "88e209b2c0a9e4e9158b6e8dd9d49950060472a1",
+          "version": "1.0.0"
+        }
+      },
+      {
+        "package": "NightscoutKit",
+        "repositoryURL": "https://github.com/mpangburn/NightscoutKit.git",
+        "state": {
+          "branch": null,
+          "revision": "f2072bf56e375eff2df780dbc5203020e13c3bc4",
+          "version": "0.2.0"
+        }
+      }
+    ]
+  },
+  "version": 1
+}
