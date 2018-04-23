@@ -17,62 +17,49 @@ struct NightscoutDisplayData {
 
 extension Nightscout {
     func fetchDisplayData(withOptions options: Options, completion: (NightscoutResult<NightscoutDisplayData>) -> Void) {
-        var entries: [NightscoutEntry]?
-        var treatments: [NightscoutTreatment]?
-        var deviceStatuses: [NightscoutDeviceStatus]?
-        var error: NightscoutError?
+        // let NightscoutDataStore do the heavy lifting
+        let dataStore = NightscoutDataStore.allDataStore()
+        addObserver(dataStore)
+        defer { removeObserver(dataStore) }
 
         let fetchGroup = DispatchGroup()
-
-        if let entryCount = options.entryCount {
+        
+        options.entryCount.map { entryCount in
             fetchGroup.enter()
             // fetch one more than the requested count so we can provide information
             // on the blood glucose delta for each entry
-            fetchMostRecentEntries(count: entryCount + 1) { result in
-                switch result {
-                case .success(let nsEntries):
-                    entries = nsEntries
-                case .failure(let nsError):
-                    error = nsError
-                }
+            fetchMostRecentEntries(count: entryCount + 1) { _ in
                 fetchGroup.leave()
             }
         }
 
-        if let treatmentCount = options.treatmentCount {
+        options.treatmentCount.map { treatmentCount in
             fetchGroup.enter()
-            fetchMostRecentTreatments(count: treatmentCount) { result in
-                switch result {
-                case .success(let nsTreatments):
-                    treatments = nsTreatments
-                case .failure(let nsError):
-                    error = nsError
-                }
+            fetchMostRecentTreatments(count: treatmentCount) { _ in
                 fetchGroup.leave()
             }
         }
 
         if options.displayDeviceStatuses {
             fetchGroup.enter()
-            fetchMostRecentDeviceStatuses() { result in
-                switch result {
-                case .success(let nsDeviceStatuses):
-                    deviceStatuses = nsDeviceStatuses
-                case .failure(let nsError):
-                    error = nsError
-                }
+            fetchMostRecentDeviceStatuses { _ in
                 fetchGroup.leave()
             }
         }
 
         fetchGroup.wait()
 
-        guard error == nil else {
-            completion(.failure(error!))
+        guard dataStore.lastError == nil else {
+            completion(.failure(dataStore.lastError!))
             return
         }
 
-        let displayData = NightscoutDisplayData(entries: entries, treatments: treatments, deviceStatuses: deviceStatuses)
+        let displayData = NightscoutDisplayData(
+            entries: options.entryCount != nil ? dataStore.fetchedEntries : nil,
+            treatments: options.treatmentCount != nil ? dataStore.fetchedTreatments : nil,
+            deviceStatuses: options.displayDeviceStatuses ? dataStore.fetchedDeviceStatuses : nil
+        )
+
         completion(.success(displayData))
     }
 }
@@ -91,35 +78,6 @@ func prettyPrintNightscoutDisplayData(_ displayData: NightscoutDisplayData) {
     }
 }
 
-func prettyPrintNightscoutError(_ error: NightscoutError) {
-    let message: String = {
-        switch error {
-        case .invalidURL:
-            return "invalid Nightscout URL"
-        case .missingAPISecret:
-            return "missing API secret"
-        case .fetchError(let error):
-            return "fetch error: \(error)"
-        case .uploadError(let error):
-            return "upload error: \(error)"
-        case .notAnHTTPURLResponse:
-            return "not an HTTP URL response"
-        case .missingData:
-            return "missing data in URL response"
-        case .unauthorized:
-            return "unauthorized"
-        case .httpError(statusCode: let statusCode, body: let body):
-            return "unexpected HTTP response: \(statusCode) \(body)"
-        case .jsonParsingError(let error):
-            return "JSON parsing error: \(error)"
-        case .dataParsingFailure(_):
-            return "data parsing failure; see https://github.com/mpangburn/NightscoutKit/issues to submit a bug report"
-        }
-    }()
-
-    printError(message: message)
-}
-
 private let dateFormatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.dateFormat = "MMM dd HH:mm"
@@ -135,7 +93,7 @@ private func prettyPrintEntries(_ entries: [NightscoutEntry]) {
     let deltaRecordingEntries = entries.recordingDeltas()
     let maxDateLength = deltaRecordingEntries.maxElementCount(by: { dateFormatter.string(from: $0.date) })!
     let maxGlucoseValueLength = deltaRecordingEntries.maxElementCount(by: \.glucoseValue.valueString)!
-    let maxDeltaLength = deltaRecordingEntries.maxElementCount(by: \.glucoseDeltaDisplayString)! + "()".count
+    let maxDeltaLength = deltaRecordingEntries.maxElementCount(by: \.glucoseDeltaString)! + "()".count
     let maxTrendLength = deltaRecordingEntries.maxElementCount(by: { entry -> String? in
         guard case .sensor(trend: let trend) = entry.source else { return nil }
         return trend.symbol
@@ -153,7 +111,7 @@ private func prettyPrintEntries(_ entries: [NightscoutEntry]) {
                 // if more than one entry was missed between entries, don't print the delta
                 return .spaces(maxDeltaLength)
             }
-            return "(\(entry.glucoseDeltaDisplayString))".rightAligned(inFieldOfLength: maxDeltaLength)
+            return "(\(entry.glucoseDeltaString))".rightAligned(inFieldOfLength: maxDeltaLength)
         }()
         let sourceString: String = {
             guard case .sensor(trend: let trend) = entry.source else {
@@ -181,12 +139,7 @@ private func prettyPrintTreatments(_ treatments: [NightscoutTreatment]) {
     let maxSimpleDescriptionLength = treatments.maxElementCount(by: \.eventType.simpleDescription)!
     let maxDetailDescriptionLength = treatments.maxElementCount(by: \.eventType.detailDescription) ?? 0
     let maxDurationLength: Int = {
-        let nonzeroMinuteDurations = treatments.lazy.flatMap { treament -> Int? in
-            let minutes = Int(treament.duration.minutes)
-            guard minutes > 0 else { return nil }
-            return minutes
-        }
-        let maxLength = nonzeroMinuteDurations.maxElementCount(by: String.init)
+        let maxLength = treatments.lazy.compactMap({ $0.duration?.minutes }).maxElementCount(by: String.init)
         return maxLength.map { $0 + durationLabel.count } ?? 0
     }()
     let maxGlucoseValueLength = treatments.lazy.flatMap({ $0.glucose?.glucoseValue.value }).maxElementCount(by: String.init) ?? 0
@@ -209,8 +162,8 @@ private func prettyPrintTreatments(_ treatments: [NightscoutTreatment]) {
         let simpleDescription = treatment.eventType.simpleDescription.leftAligned(inFieldOfLength: maxSimpleDescriptionLength)
         let detailDescription = treatment.eventType.detailDescription.leftAlignedOrSpaces(inFieldOfLength: maxDetailDescriptionLength)
         let durationString: String = {
-            let effectiveDuration = treatment.duration > 0 ? Int(treatment.duration.minutes) : nil
-            return effectiveDuration.map({ "\($0)\(durationLabel)" }).rightAlignedOrSpaces(inFieldOfLength: maxDurationLength)
+            let durationInMinutes = treatment.duration.map { $0.minutes }
+            return durationInMinutes.map({ "\($0)\(durationLabel)" }).rightAlignedOrSpaces(inFieldOfLength: maxDurationLength)
         }()
         let glucoseValueString = treatment.glucose.map({ String($0.glucoseValue.value) }).rightAlignedOrSpaces(inFieldOfLength: maxGlucoseValueLength)
         let insulinGivenString = treatment.insulinGiven.map({ "\($0)\(insulinGivenLabel)" }).rightAlignedOrSpaces(inFieldOfLength: maxInsulinGivenLength)
@@ -247,7 +200,7 @@ private func prettyPrintDeviceStatuses(_ deviceStatuses: [NightscoutDeviceStatus
     }
     let pumpDeviceString = pumpStatusDeviceStatus.map { _ in "Pump" }
     let uploaderDeviceString = uploaderDeviceStatus.map { _ in "Uploader" }
-    let deviceStrings = [closedLoopDeviceString, pumpDeviceString, uploaderDeviceString].flatMap { $0 }
+    let deviceStrings = [closedLoopDeviceString, pumpDeviceString, uploaderDeviceString].compact()
     let maxDeviceStringLength = deviceStrings.maxElementCount() ?? 0
 
     if let closedLoopDeviceStatus = closedLoopDeviceStatus {
@@ -265,7 +218,7 @@ private func prettyPrintDeviceStatuses(_ deviceStatuses: [NightscoutDeviceStatus
             return "enacted: \(temp.rate)U/hr, \(Int(tempTimeRemaining.minutes))min remaining"
         }
 
-        let stringPieces = [dateString, deviceString, insulinOnBoardString, carbsOnBoardString, enactedTemporaryBasalString].flatMap { $0 }
+        let stringPieces = [dateString, deviceString, insulinOnBoardString, carbsOnBoardString, enactedTemporaryBasalString].compact()
         print(stringPieces.joined(separator: separator))
     }
 
@@ -276,7 +229,7 @@ private func prettyPrintDeviceStatuses(_ deviceStatuses: [NightscoutDeviceStatus
         let reservoirInsulinRemainingString = pumpStatus.reservoirInsulinRemaining.map { String(format: "%.1fU remaining", $0) }
         let batteryStatusString = pumpStatus.batteryStatus?.status.flatMap { $0 == .low ? "low" : nil }
         let isSuspendedString = pumpStatus.isSuspended.flatMap { $0 ? "suspended" : nil }
-        let stringPieces = [dateString, deviceString, reservoirInsulinRemainingString, batteryStatusString, isSuspendedString].flatMap { $0 }
+        let stringPieces = [dateString, deviceString, reservoirInsulinRemainingString, batteryStatusString, isSuspendedString].compact()
         print(stringPieces.joined(separator: separator))
     }
 

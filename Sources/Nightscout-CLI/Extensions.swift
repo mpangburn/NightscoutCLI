@@ -65,25 +65,31 @@ extension TimeInterval {
     }
 }
 
+extension Sequence {
+    func compact<T>() -> [T] where Element == T? {
+        return compactMap { $0 }
+    }
+}
+
 extension Collection {
     func all(satisfy predicate: (Element) -> Bool) -> Bool {
         return !contains(where: { !predicate($0) })
     }
 
-    func maxElementCount<C: Collection>(by collectionProvider: (Element) -> C?) -> Int? where C.IndexDistance == Int {
-        return lazy.flatMap(collectionProvider).map({ $0.count }).max()
+    func maxElementCount<C: Collection>(by collectionProvider: (Element) -> C?) -> Int? {
+        return lazy.compactMap(collectionProvider).map({ $0.count }).max()
     }
 
-    func maxElementCount<C: Collection>(by collectionKeyPath: KeyPath<Element, C>) -> Int? where C.IndexDistance == Int {
+    func maxElementCount<C: Collection>(by collectionKeyPath: KeyPath<Element, C>) -> Int? {
         return maxElementCount(by: { $0[keyPath: collectionKeyPath] })
     }
 
-    func maxElementCount<C: Collection>(by collectionKeyPath: KeyPath<Element, C?>) -> Int? where C.IndexDistance == Int {
+    func maxElementCount<C: Collection>(by collectionKeyPath: KeyPath<Element, C?>) -> Int? {
         return maxElementCount(by: { $0[keyPath: collectionKeyPath] })
     }
 }
 
-extension Collection where Element: Collection, Element.IndexDistance == Int {
+extension Collection where Element: Collection {
     func maxElementCount() -> Int? {
         return maxElementCount(by: { $0 })
     }

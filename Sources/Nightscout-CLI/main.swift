@@ -48,7 +48,7 @@ nightscout.fetchDisplayData(withOptions: options) { result in
     case .success(let displayData):
         prettyPrintNightscoutDisplayData(displayData)
     case .failure(let error):
-        prettyPrintNightscoutError(error)
+        printError(message: error.localizedDescription)
         exit(EXIT_FAILURE)
     }
     fetchGroup.leave()
