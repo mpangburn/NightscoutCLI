@@ -142,13 +142,13 @@ private func prettyPrintTreatments(_ treatments: [NightscoutTreatment]) {
         let maxLength = treatments.lazy.compactMap({ $0.duration?.minutes }).maxElementCount(by: String.init)
         return maxLength.map { $0 + durationLabel.count } ?? 0
     }()
-    let maxGlucoseValueLength = treatments.lazy.flatMap({ $0.glucose?.glucoseValue.value }).maxElementCount(by: String.init) ?? 0
+    let maxGlucoseValueLength = treatments.lazy.compactMap({ $0.glucose?.glucoseValue.value }).maxElementCount(by: String.init) ?? 0
     let maxInsulinGivenLength: Int = {
-        let maxLength = treatments.lazy.flatMap({ $0.insulinGiven }).maxElementCount(by: String.init)
+        let maxLength = treatments.lazy.compactMap({ $0.insulinGiven }).maxElementCount(by: String.init)
         return maxLength.map { $0 + insulinGivenLabel.count } ?? 0
     }()
     let maxCarbsConsumedLength: Int = {
-        let maxLength = treatments.lazy.flatMap({ $0.carbsConsumed }).maxElementCount(by: String.init)
+        let maxLength = treatments.lazy.compactMap({ $0.carbsConsumed }).maxElementCount(by: String.init)
         return maxLength.map { $0 + carbsConsumedLabel.count } ?? 0
     }()
     let maxRecorderLength = treatments.maxElementCount(by: \.recorder) ?? 0
